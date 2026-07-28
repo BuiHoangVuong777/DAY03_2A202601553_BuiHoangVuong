@@ -5,24 +5,23 @@ flowchart TD
     B -->|Câu hỏi phức tạp| D[ReAct Agent Path]
 
     %% Chatbot path
-    C --> E[LLM xử lý trực tiếp]
+    C --> E[LLM trả lời trực tiếp]
     E --> F[Trả lời kiến thức học tập tổng quát]
     F --> G([Final Answer])
 
     %% ReAct Agent path
     D --> H[Phân tích hồ sơ và yêu cầu sinh viên]
-    H --> I{Cần thông tin gì?}
+    H --> I{Cần loại thông tin nào?}
 
     I -->|Tìm khóa học phù hợp| J[Tool: search_courses]
-    I -->|Xem thông tin khóa học| K[Tool: get_course_details]
-    I -->|Kiểm tra điều kiện học| L[Tool: check_prerequisites]
+    I -->|Xem chi tiết khóa học| K[Tool: get_course_details]
+    I -->|Kiểm tra điều kiện tiên quyết| L[Tool: check_prerequisites]
 
     J --> M[Observation]
     K --> M
     L --> M
 
     M --> N{Đã đủ thông tin chưa?}
-
     N -->|Chưa đủ| H
     N -->|Đã đủ| O[Tổng hợp và giải thích đề xuất]
     O --> P([Final Answer])
