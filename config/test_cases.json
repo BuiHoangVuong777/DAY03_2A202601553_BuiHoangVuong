@@ -1,32 +1,268 @@
 [
   {
-    "id": 1,
-    "category": "🟢 Đơn giản (Chỉ cần LLM)",
-    "question": "Thủ đô của Việt Nam là gì?",
-    "expected_behavior": "Chatbot trả lời trực tiếp từ kiến thức có sẵn."
+    "id": "TC01",
+    "input": {
+      "goal": "học nền tảng",
+      "level": "chưa biết gì",
+      "free_time": "ít",
+      "budget": "thấp"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng",
+      "reason": "Bạn mới bắt đầu, thời gian rảnh ít, ngân sách thấp nên cần khóa học ngắn, dễ vào và có bài tập thực hành ngay.",
+      "short_path": [
+        "Học cú pháp cơ bản",
+        "Làm bài tập nhỏ",
+        "Làm mini project"
+      ],
+      "warning": "Chưa nên học nâng cao."
+    }
   },
   {
-    "id": 2,
-    "category": "🟢 Đơn giản (Chỉ cần LLM)",
-    "question": "Nêu 3 lời khuyên để học tốt lập trình.",
-    "expected_behavior": "Chatbot trả lời trực tiếp từ kiến thức có sẵn."
+    "id": "TC02",
+    "input": {
+      "goal": "học nền tảng",
+      "level": "biết cơ bản",
+      "free_time": "vừa",
+      "budget": "trung bình"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng củng cố",
+      "reason": "Bạn đã biết cơ bản nhưng chưa đủ chắc, nên học khóa ôn nền tảng để học hiệu quả hơn.",
+      "short_path": [
+        "Ôn syntax",
+        "Luyện hàm, loop, list",
+        "Làm bài tập và project nhỏ"
+      ],
+      "warning": "Không nên nhảy thẳng vào khóa nâng cao."
+    }
   },
   {
-    "id": 3,
-    "category": "🟡 Multi-step (Cần Tool)",
-    "question": "Thời tiết ở Hà Nội hôm nay thế nào và tôi nên mặc gì đi chơi?",
-    "expected_behavior": "Agent gọi tool get_weather('Hà Nội') rồi suy luận trang phục."
+    "id": "TC03",
+    "input": {
+      "goal": "làm bài tập",
+      "level": "chưa biết gì",
+      "free_time": "nhiều",
+      "budget": "thấp"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng có nhiều bài tập",
+      "reason": "Bạn có nhiều thời gian nên học chắc từ đầu qua thực hành sẽ hiệu quả hơn.",
+      "short_path": [
+        "Học cú pháp",
+        "Làm bài tập sau mỗi bài",
+        "Làm project nhỏ cuối khóa"
+      ],
+      "warning": "Không nên học khóa chỉ toàn lý thuyết."
+    }
   },
   {
-    "id": 4,
-    "category": "🟡 Multi-step (Cần gọi 2 Tools)",
-    "question": "Kiểm tra vé máy bay từ TP.HCM đi Hà Nội ngày mai và dự báo thời tiết ở Hà Nội.",
-    "expected_behavior": "Agent gọi tool search_flights và get_weather để trả lời đầy đủ."
+    "id": "TC04",
+    "input": {
+      "goal": "đi thực tập",
+      "level": "biết cơ bản",
+      "free_time": "vừa",
+      "budget": "trung bình"
+    },
+    "expected": {
+      "course_recommendation": "Python thực chiến",
+      "reason": "Mục tiêu là đi thực tập nên cần khóa thiên về ứng dụng và project để làm portfolio.",
+      "short_path": [
+        "Ôn nền tảng",
+        "Làm project thực tế",
+        "Học Git và cách trình bày project"
+      ],
+      "warning": "Nếu kiến thức cơ bản còn hổng thì nên ôn trước."
+    }
   },
   {
-    "id": 5,
-    "category": "🔴 Edge Case (Bẫy Guardrail)",
-    "question": "Tra cứu thời tiết ở thành phố Atlantis ngày 32/13/2026.",
-    "expected_behavior": "Tool báo lỗi tham số/thất bại, Guardrail ngắt sau 3 bước và trả về thông báo lịch sự."
+    "id": "TC05",
+    "input": {
+      "goal": "học nâng cao",
+      "level": "đã từng học OOP hoặc làm project",
+      "free_time": "nhiều",
+      "budget": "cao"
+    },
+    "expected": {
+      "course_recommendation": "Python nâng cao",
+      "reason": "Bạn đã có nền và có đủ thời gian, ngân sách để học sâu hơn.",
+      "short_path": [
+        "Ôn OOP",
+        "Học module/package",
+        "Làm project lớn hơn"
+      ],
+      "warning": "Chỉ học nâng cao nếu nền tảng đã ổn."
+    }
+  },
+  {
+    "id": "TC06",
+    "input": {
+      "goal": "học nâng cao",
+      "level": "chưa biết gì",
+      "free_time": "ít",
+      "budget": "cao"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng",
+      "reason": "Mục tiêu nâng cao nhưng nền tảng chưa có thì cần học cơ bản trước để tránh bị ngợp.",
+      "short_path": [
+        "Học cú pháp cơ bản",
+        "Làm bài tập nhỏ",
+        "Sau đó mới vào nâng cao"
+      ],
+      "warning": "Chưa đủ nền để học nâng cao ngay."
+    }
+  },
+  {
+    "id": "TC07",
+    "input": {
+      "goal": "đi thực tập",
+      "level": "chưa biết gì",
+      "free_time": "ít",
+      "budget": "thấp"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng cấp tốc",
+      "reason": "Bạn cần vào thực tập nhưng đang bắt đầu từ số 0, nên cần khóa nền tảng gọn và thực hành nhanh.",
+      "short_path": [
+        "Học cú pháp cơ bản",
+        "Luyện bài tập ngắn",
+        "Làm mini project"
+      ],
+      "warning": "Chưa nên học khóa nặng hoặc quá nâng cao."
+    }
+  },
+  {
+    "id": "TC08",
+    "input": {
+      "goal": "học nền tảng",
+      "level": "đã từng học OOP hoặc làm project",
+      "free_time": "vừa",
+      "budget": "thấp"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng cô đọng",
+      "reason": "Bạn đã có chút nền, nên chỉ cần khóa cô đọng để vá chỗ thiếu và tiết kiệm chi phí.",
+      "short_path": [
+        "Ôn phần còn yếu",
+        "Làm bài tập chọn lọc",
+        "Làm project nhỏ"
+      ],
+      "warning": "Không cần mua khóa quá đắt nếu mục tiêu chỉ là ôn lại."
+    }
+  },
+  {
+    "id": "TC09",
+    "input": {
+      "goal": "học nâng cao",
+      "level": "biết cơ bản",
+      "free_time": "ít",
+      "budget": "trung bình"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng củng cố trước",
+      "reason": "Nâng cao nhưng thời gian ít và nền mới ở mức cơ bản nên cần học an toàn hơn.",
+      "short_path": [
+        "Ôn nền tảng",
+        "Làm bài tập",
+        "Mới vào nâng cao"
+      ],
+      "warning": "Nếu vào nâng cao ngay dễ bị quá tải."
+    }
+  },
+  {
+    "id": "TC10",
+    "input": {
+      "goal": "học nền tảng",
+      "level": "biết cơ bản",
+      "free_time": "nhiều",
+      "budget": "cao"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng + thực hành nhiều",
+      "reason": "Có thời gian và ngân sách nên có thể học bài bản hơn với nhiều bài tập và project.",
+      "short_path": [
+        "Ôn cơ bản",
+        "Làm bài tập",
+        "Làm project thực tế"
+      ],
+      "warning": "Không cần vội vào nâng cao nếu nền chưa thật chắc."
+    }
+  },
+  {
+    "id": "TC11",
+    "input": {
+      "goal": "học nâng cao",
+      "level": "đã từng học OOP hoặc làm project",
+      "free_time": "ít",
+      "budget": "thấp"
+    },
+    "expected": {
+      "course_recommendation": "Python nâng cao chọn lọc hoặc ôn nhanh trước",
+      "reason": "Bạn có nền rồi nhưng thời gian và ngân sách hạn chế, nên cần học phần cốt lõi trước.",
+      "short_path": [
+        "Ôn nhanh kiến thức nền",
+        "Học phần nâng cao quan trọng",
+        "Làm project nhỏ"
+      ],
+      "warning": "Không nên đăng ký khóa quá dài và quá đắt."
+    }
+  },
+  {
+    "id": "TC12",
+    "input": {
+      "goal": "học nền tảng",
+      "level": "chưa biết gì",
+      "free_time": "vừa",
+      "budget": "trung bình"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng có bài tập thực hành",
+      "reason": "Người mới bắt đầu sẽ học tốt hơn nếu có bài tập đi kèm thay vì chỉ xem lý thuyết.",
+      "short_path": [
+        "Học syntax",
+        "Làm bài tập từng phần",
+        "Làm mini project"
+      ],
+      "warning": "Chưa nên chọn khóa nâng cao."
+    }
+  },
+  {
+    "id": "TC13",
+    "input": {
+      "goal": "mình muốn học nhanh để đi làm",
+      "level": "chưa biết gì",
+      "free_time": "ít",
+      "budget": "trung bình"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng cấp tốc",
+      "reason": "Dù mục tiêu là đi làm, bạn vẫn cần nền tảng trước vì đang bắt đầu từ số 0.",
+      "short_path": [
+        "Học cú pháp cơ bản",
+        "Làm bài tập trọng tâm",
+        "Làm project ngắn"
+      ],
+      "warning": "Không nên học nâng cao ngay."
+    }
+  },
+  {
+    "id": "TC14",
+    "input": {
+      "goal": "mình đã làm project rồi nhưng quên khá nhiều",
+      "level": "đã từng học OOP hoặc làm project",
+      "free_time": "vừa",
+      "budget": "thấp"
+    },
+    "expected": {
+      "course_recommendation": "Python nền tảng ôn lại",
+      "reason": "Bạn đã có nền nhưng đang quên nhiều, nên học lại phần cốt lõi trước khi nâng cao.",
+      "short_path": [
+        "Ôn syntax",
+        "Làm bài tập",
+        "Làm project nhỏ để lấy lại nhịp"
+      ],
+      "warning": "Chưa nên học khóa quá sâu."
+    }
   }
 ]
