@@ -1,14 +1,14 @@
 """
 🚀 CORE AGENT APP (Role 4: Core Agent Developer)
 File chính ghép nối tất cả các thành phần: Tools + Prompts + Test Cases + LLM Provider.
-LLM Provider trả về LangChain ChatModel (gọi .invoke() để sử dụng).
+Sử dụng LangChain native tool calling mechanism.
 """
 
 import json
 import os
 import sys
+from typing import Generator
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage
 
 # Đảm bảo import các module cùng thư mục src/ hoạt động mượt mà
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -21,12 +21,99 @@ if sys.stdout.encoding != "utf-8":
         pass
 
 # Import các thành phần từ file của Role 2, Role 3 & Multi-Provider Adapter
-from tools import AVAILABLE_TOOLS, search_ai_courses, get_ai_course_detail
-from tools import check_course_readiness, get_learning_track, filter_courses_by_constraints
-from prompts import CHATBOT_BASELINE_PROMPT, REACT_SYSTEM_PROMPT, MAX_ITERATIONS
+from tools import AVAILABLE_TOOLS
+from prompts import CHATBOT_BASELINE_PROMPT, MAX_ITERATIONS
 from providers import get_llm_provider
+from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
-load_dotenv()
+# ============================================================================
+# CONVERT TOOLS TO LANGCHAIN FORMAT
+# ============================================================================
+
+
+@tool
+def search_ai_courses(keyword: str, level: str = None, budget_level: str = None) -> str:
+    """Search for AI/Python courses based on keyword, skill level, and budget.
+
+    Args:
+        keyword: Search term (e.g., "machine learning", "python", "deep learning")
+        level: Filter by minimum profile level (beginner/basic/intermediate). If None, no filter.
+        budget_level: Filter by maximum budget (low/medium/high). If None, no filter.
+
+    Returns:
+        Formatted string with course search results
+    """
+    return AVAILABLE_TOOLS["search_ai_courses"](keyword, level, budget_level)
+
+
+@tool
+def get_ai_course_detail(course_code: str) -> str:
+    """Get complete details of a specific AI/Python course.
+
+    Args:
+        course_code: Course code (e.g., "PY101", "ML301", "DL401")
+
+    Returns:
+        Formatted string with course details including prerequisites, skills, duration, etc.
+    """
+    return AVAILABLE_TOOLS["get_ai_course_detail"](course_code)
+
+
+@tool
+def check_course_readiness(course_code: str, current_skills: list[str]) -> str:
+    """Check if a learner is ready for a course based on their current skills.
+
+    Args:
+        course_code: Course code to check (e.g., "ML301")
+        current_skills: List of skills the learner currently has (e.g., ["python", "math", "statistics"])
+
+    Returns:
+        Formatted string indicating readiness status and skill gaps
+    """
+    return AVAILABLE_TOOLS["check_course_readiness"](course_code, current_skills)
+
+
+@tool
+def get_learning_track(goal: str) -> str:
+    """Get the standard learning path for a specific goal.
+
+    Args:
+        goal: Learning objective (e.g., "learn Python", "machine learning internship", "generative AI agent")
+
+    Returns:
+        Formatted string with recommended learning path and course sequence
+    """
+    return AVAILABLE_TOOLS["get_learning_track"](goal)
+
+
+@tool
+def filter_courses_by_constraints(
+    course_codes: list[str], available_hours_per_week: int, budget_level: str
+) -> str:
+    """Filter courses based on time and budget constraints.
+
+    Args:
+        course_codes: List of course codes to filter (e.g., ["PY101", "ML301"])
+        available_hours_per_week: Available hours per week (integer or level like "ít"/"vừa"/"nhiều")
+        budget_level: Budget level (low/medium/high)
+
+    Returns:
+        Formatted string categorizing courses as suitable or unsuitable
+    """
+    return AVAILABLE_TOOLS["filter_courses_by_constraints"](
+        course_codes, available_hours_per_week, budget_level
+    )
+
+
+# Map of tool names to LangChain tool objects
+LANGCHAIN_TOOLS = {
+    "search_ai_courses": search_ai_courses,
+    "get_ai_course_detail": get_ai_course_detail,
+    "check_course_readiness": check_course_readiness,
+    "get_learning_track": get_learning_track,
+    "filter_courses_by_constraints": filter_courses_by_constraints,
+}
 
 
 def load_test_cases():
@@ -68,48 +155,133 @@ def run_baseline_chatbot(user_query: str, llm):
     print(f"🤖 Chatbot trả lời:\n{response.content}")
 
 
-def run_react_agent(user_query: str, llm):
+def run_react_agent(
+    user_query: str,
+    llm,
+    messages: list,
+    step_offset: int = 0,
+) -> Generator[dict, None, None]:
     """
-    Dựng vòng lặp ReAct Agent (Thought → Action → Observation) có Guardrails.
-    ⚠️  Hiện tại là MOCK — mô phỏng Thought/Action/Observation bằng script cố định.
-        Sẽ thay bằng ReAct loop thực sự (gọi LLM → parse → dispatch tool) ở bước sau.
+    Vòng lặp ReAct Agent – multi-turn.
+
+    Thêm HumanMessage(user_query) vào `messages`, chạy ReAct loop, và
+    append tất cả message mới (AIMessage, ToolMessage, ...) trực tiếp vào
+    `messages`. Khi generator kết thúc, `messages` đã chứa đầy đủ lịch sử
+    của turn này để caller có thể tiếp tục turn kế tiếp.
+
+    Generator yield dict tại mỗi bước:
+    - {"type": "thought", "step": int, "content": str}
+    - {"type": "action",  "step": int, "tool": str, "args": dict, "call_id": str}
+    - {"type": "observation", "step": int, "tool": str, "content": str, "call_id": str}
+    - {"type": "final",   "step": int, "content": str}
+    - {"type": "guardrail", "step": int, "content": str}
+    - {"type": "error",   "step": int, "content": str}
+
+    Args:
+        user_query:   Câu hỏi của người dùng ở turn này.
+        llm:          LangChain ChatModel (từ get_llm_provider()).
+        messages:     Danh sách message đang tích luỹ (caller-owned, mutated in-place).
+        step_offset:  Giá trị bắt đầu của step counter (để đánh số step liên tục
+                      qua nhiều turn).
+
+    Yields:
+        dict: Sự kiện theo thứ tự xảy ra.
+
+    Returns (sau khi yield xong):
+        int: Số bước đã chạy trong turn này (để caller cập nhật step_offset).
     """
-    print(f"\n🤖 [REACT AGENT — MOCK] Câu hỏi: {user_query}")
-    print(f"⚙️ System Prompt: {REACT_SYSTEM_PROMPT.strip()[:120]}...")
+    from langchain_core.messages import AIMessage  # local import to avoid cycle
 
-    step = 0
-    while step < MAX_ITERATIONS:
-        step += 1
-        print(f"\n--- 🔄 Vòng lặp ReAct (Step {step}/{MAX_ITERATIONS}) ---")
+    # Bind tools vào LLM - LangChain tự sinh JSON schema từ @tool
+    tools = list(LANGCHAIN_TOOLS.values())
+    llm_with_tools = llm.bind_tools(tools)
 
-        if step == 1:
-            # Mô phỏng LLM suy luận: cần tìm lộ trình học phù hợp
-            print("🧠 Thought: Người dùng muốn học Python nền tảng, cần tìm lộ trình.")
-            print("🛠️ Action: get_learning_track['python nền tảng']")
+    # Append HumanMessage cho turn này
+    messages.append(HumanMessage(content=user_query))
 
-            obs = get_learning_track("python nền tảng")
-            print(f"👁️ Observation:\n{obs}")
+    for step_rel in range(1, MAX_ITERATIONS + 1):
+        step = step_offset + step_rel
 
-        elif step == 2:
-            # Mô phỏng LLM đã có đủ thông tin từ Observation → trả lời
-            print("🧠 Thought: Đã có lộ trình học, giờ tôi có thể tư vấn cho người dùng.")
-            print(
-                "🏁 Final Answer: Dựa trên hồ sơ của bạn, bạn nên bắt đầu từ Python nền tảng. "
-                "Lộ trình gồm PY101 → PY102. Hãy bắt đầu với khóa PY101 (Python nhập môn) "
-                "vì bạn chưa biết gì và ngân sách thấp."
-            )
-            break
+        try:
+            response = llm_with_tools.invoke(messages)
+        except Exception as e:
+            yield {"type": "error", "step": step, "content": f"LLM call failed: {e}"}
+            return step_rel
 
-    if step >= MAX_ITERATIONS:
-        print(f"🛡️ GUARDRAIL TRIGGERED: Đã đạt giới hạn {MAX_ITERATIONS} bước. Ngắt an toàn!")
+        # Sau khi LLM trả lời, append AI message vào messages.
+        # Nếu response CÓ tool_calls, response đã chứa cả tool_calls metadata
+        # → append nguyên bản, rồi sau đó append từng ToolMessage.
+        # Nếu response KHÔNG có tool_calls, đó là final message.
+        messages.append(AIMessage(content=response.content or "", tool_calls=getattr(response, "tool_calls", []) or []))
+
+        if response.content:
+            yield {"type": "thought", "step": step, "content": response.content}
+
+        tool_calls = getattr(response, "tool_calls", []) or []
+        if tool_calls:
+            for tc in tool_calls:
+                tool_name = tc["name"]
+                tool_args = tc["args"]
+                call_id = tc["id"]
+
+                yield {
+                    "type": "action",
+                    "step": step,
+                    "tool": tool_name,
+                    "args": tool_args,
+                    "call_id": call_id,
+                }
+
+                # Dispatch tool
+                if tool_name not in LANGCHAIN_TOOLS:
+                    obs = f"LỖI: Tool '{tool_name}' không tồn tại. Các tool hợp lệ: {', '.join(LANGCHAIN_TOOLS.keys())}"
+                else:
+                    try:
+                        obs = LANGCHAIN_TOOLS[tool_name].invoke(tool_args)
+                    except Exception as e:
+                        obs = f"LỖI HỆ THỐNG: Tool '{tool_name}' gặp lỗi: {e}"
+
+                # Append ToolMessage vào messages (liên kết qua call_id)
+                from langchain_core.messages import ToolMessage
+                messages.append(ToolMessage(content=obs, tool_call_id=call_id))
+
+                yield {
+                    "type": "observation",
+                    "step": step,
+                    "tool": tool_name,
+                    "content": obs,
+                    "call_id": call_id,
+                }
+        else:
+            # Không có tool_calls → Final Answer
+            yield {"type": "final", "step": step, "content": response.content or ""}
+            return step_rel
+
+    # Guardrail
+    yield {
+        "type": "guardrail",
+        "step": step_offset + MAX_ITERATIONS,
+        "content": f"Đã đạt giới hạn {MAX_ITERATIONS} bước. Ngắt an toàn.",
+    }
+    return MAX_ITERATIONS
+
+
+def _init_messages() -> list:
+    """Khởi tạo messages với system prompt cho ReAct Agent."""
+    system_prompt = """You are a helpful ReAct Agent with access to tools.
+
+When you need information, call the appropriate tool. When you receive tool results, use them to inform your reasoning. When you have enough information to answer, provide the final answer directly.
+
+Be concise and specific in your reasoning."""
+    return [SystemMessage(content=system_prompt)]
 
 
 if __name__ == "__main__":
-    print("==================================================")
+    print("=" * 60)
     print("🏫 ĐẠI HỌC VINUNI - BÀI LAB 3: CHATBOT VS REACT AGENT")
-    print("==================================================")
+    print("=" * 60)
 
-    # Khởi tạo LangChain ChatModel qua get_llm_provider
+    # Khởi tạo LangChain ChatModel
     try:
         llm = get_llm_provider()
     except ValueError as e:
@@ -120,21 +292,98 @@ if __name__ == "__main__":
 
     model_id = getattr(llm, "model_name", None) or getattr(llm, "model", "?")
     provider_name = getattr(llm, "_provider_name", "?")
-    print(f"🔌 Provider   : {provider_name}")
-    print(f"🤖 ChatModel  : {llm.__class__.__name__}")
-    print(f"🔧 Model      : {model_id}")
+    print(f"🔌 Provider  : {provider_name}")
+    print(f"🤖 ChatModel : {llm.__class__.__name__}")
+    print(f"🔧 Model     : {model_id}")
 
-    tests = load_test_cases()
-    print(f"✅ Đã tải {len(tests)} Test Cases")
+    print("\n" + "─" * 60)
+    print("REACT AGENT - Multi-turn Conversation")
+    print("─" * 60)
+    print("Gõ câu hỏi của bạn, hoặc:")
+    print("  • 'quit' / 'exit' / 'q' để thoát")
+    print("  • 'reset' / 'clear' để xóa lịch sử")
+    print("  • 'history' để xem toàn bộ conversation")
+    print("─" * 60 + "\n")
 
-    # Chọn test case đầu tiên để demo
-    sample_tc = tests[0]
-    sample_query = _build_query(sample_tc)
-    print(f"📋 Test case : {sample_tc['id']}")
-    print(f"👤 Query     : {sample_query}\n")
+    # Khởi tạo conversation history (sẽ được giữ qua nhiều turn)
+    messages = _init_messages()
+    step_offset = 0
+    turn_count = 0
 
-    print("─── DEMO 1: CHATBOT BASELINE (không có Tools) ───")
-    run_baseline_chatbot(sample_query, llm)
+    while True:
+        # Đọc input từ user
+        try:
+            user_input = input("👤 Bạn: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\n👋 Tạm biệt!")
+            break
 
-    print("\n─── DEMO 2: REACT AGENT (có Tools — MOCK) ───")
-    run_react_agent(sample_query, llm)
+        if not user_input:
+            continue
+
+        # Xử lý commands
+        cmd = user_input.lower()
+        if cmd in ("quit", "exit", "q"):
+            print("\n👋 Tạm biệt!")
+            break
+        elif cmd in ("reset", "clear"):
+            messages = _init_messages()
+            step_offset = 0
+            turn_count = 0
+            print("\n🔄 Đã xóa lịch sử. Bắt đầu cuộc trò chuyện mới.\n")
+            continue
+        elif cmd == "history":
+            print("\n" + "─" * 60)
+            print(f"LỊCH SỬ CUỘC TRÒ CHUYỆN ({turn_count} turn, {len(messages)} messages)")
+            print("─" * 60)
+            for i, msg in enumerate(messages):
+                role = msg.__class__.__name__
+                content = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
+                print(f"  [{i}] {role}: {content}")
+            print("─" * 60 + "\n")
+            continue
+
+        # Bắt đầu turn mới
+        turn_count += 1
+        print(f"\n{'═' * 60}")
+        print(f"TURN {turn_count}: Agent đang suy nghĩ...")
+        print(f"{'═' * 60}\n")
+
+        # Chạy ReAct agent với accumulated messages
+        for event in run_react_agent(user_input, llm, messages, step_offset):
+            step = event.get("step", "?")
+            rtype = event["type"]
+
+            if rtype == "thought":
+                print(f"[Step {step}] 💭 Thought")
+                print(f"         {event['content']}\n")
+
+            elif rtype == "action":
+                args_str = json.dumps(event["args"], ensure_ascii=False, indent=2)
+                print(f"[Step {step}] 🛠️  Action: {event['tool']}")
+                print(f"         Args: {args_str}\n")
+
+            elif rtype == "observation":
+                obs = event["content"]
+                obs_preview = obs[:200].replace("\n", " ↵ ")
+                print(f"[Step {step}] 👁️  Observation ({event['tool']})")
+                print(f"         {obs_preview}{'...' if len(obs) > 200 else ''}\n")
+
+            elif rtype == "final":
+                print(f"[Step {step}] ✅ Final Answer")
+                print(f"   {event['content']}\n")
+
+            elif rtype == "guardrail":
+                print(f"[Step {step}] 🛡️  Guardrail")
+                print(f"   {event['content']}\n")
+
+            elif rtype == "error":
+                print(f"[Step {step}] ❌ Error")
+                print(f"   {event['content']}\n")
+
+        # Cập nhật step_offset để turn sau đánh số step liên tục
+        step_offset += MAX_ITERATIONS
+
+        print("─" * 60 + "\n")
+
+    print("=" * 60)
