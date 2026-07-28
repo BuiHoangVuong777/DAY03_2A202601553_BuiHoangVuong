@@ -13,6 +13,10 @@ from dotenv import load_dotenv
 # Đảm bảo import các module cùng thư mục src/ hoạt động mượt mà
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# Nạp API keys từ .env ở thư mục gốc project (chạy từ đâu cũng đúng)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
 # Đảm bảo in ra Tiếng Việt và Emojis không bị lỗi trên Windows Console
 if sys.stdout.encoding != "utf-8":
     try:
@@ -22,7 +26,7 @@ if sys.stdout.encoding != "utf-8":
 
 # Import các thành phần từ file của Role 2, Role 3 & Multi-Provider Adapter
 from tools import AVAILABLE_TOOLS
-from prompts import CHATBOT_BASELINE_PROMPT, MAX_ITERATIONS
+from prompts import AGENT_SYSTEM_PROMPT, CHATBOT_BASELINE_PROMPT, MAX_ITERATIONS
 from providers import get_llm_provider
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -267,13 +271,12 @@ def run_react_agent(
 
 
 def _init_messages() -> list:
-    """Khởi tạo messages với system prompt cho ReAct Agent."""
-    system_prompt = """You are a helpful ReAct Agent with access to tools.
-
-When you need information, call the appropriate tool. When you receive tool results, use them to inform your reasoning. When you have enough information to answer, provide the final answer directly.
-
-Be concise and specific in your reasoning."""
-    return [SystemMessage(content=system_prompt)]
+    """
+    Khởi tạo messages với system prompt cho ReAct Agent.
+    Dùng AGENT_SYSTEM_PROMPT từ prompts.py (Role 3) để guardrails phạm vi và
+    chống prompt injection thực sự có hiệu lực ở cả CLI lẫn web server.
+    """
+    return [SystemMessage(content=AGENT_SYSTEM_PROMPT)]
 
 
 if __name__ == "__main__":

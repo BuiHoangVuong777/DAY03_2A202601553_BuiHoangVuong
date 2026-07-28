@@ -22,6 +22,7 @@ import threading
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 # ----------------------------------------------------------------------------
 # Import agent core từ src/
@@ -45,16 +46,22 @@ _state = {
     "step_offset": 0,
     "turn": 0,
     "init_error": None,
+    "busy": False,  # đang có 1 turn ReAct chạy dở hay không
 }
-_lock = threading.Lock()
+_lock = threading.Lock()  # mutex ngắn, chỉ bảo vệ việc đọc/ghi _state
 
 
 def _get_llm():
-    """Khởi tạo LLM lazily (giống __main__ của app.py)."""
-    if _state["llm"] is None and _state["init_error"] is None:
+    """
+    Khởi tạo LLM lazily (giống __main__ của app.py).
+    Nếu lần trước lỗi (vd: thiếu API key) thì lần gọi sau vẫn thử lại,
+    để sửa .env xong chỉ cần refresh trang, không phải restart server.
+    """
+    if _state["llm"] is None:
         try:
             _state["llm"] = get_llm_provider()
             _state["messages"] = _init_messages()
+            _state["init_error"] = None
         except Exception as e:  # thiếu API key, v.v.
             _state["init_error"] = str(e)
     return _state["llm"]
@@ -95,6 +102,8 @@ def status():
 @app.post("/api/reset")
 def reset():
     with _lock:
+        # Turn đang chạy (nếu có) giữ tham chiếu tới list messages CŨ,
+        # nên gán list mới ở đây là an toàn, không cần chờ nó kết thúc.
         _state["messages"] = _init_messages()
         _state["step_offset"] = 0
         _state["turn"] = 0
@@ -109,43 +118,67 @@ def chat(message: str = Query(..., min_length=1)):
             status_code=503,
             content={
                 "error": f"Chưa cấu hình LLM provider: {_state['init_error']}. "
-                "Thiết lập trong file .env (xem .env.example)."
+                "Thiết lập LLM_PROVIDER và API key trong file .env ở thư mục gốc."
             },
         )
 
-    if not _lock.acquire(blocking=False):
-        return JSONResponse(
-            status_code=409,
-            content={"error": "Agent đang xử lý một câu hỏi khác. Vui lòng đợi."},
-        )
+    # Chặn 2 turn chạy song song (state hội thoại chỉ có 1 session)
+    with _lock:
+        if _state["busy"]:
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Agent đang xử lý một câu hỏi khác. Vui lòng đợi."},
+            )
+        _state["busy"] = True
+        _state["turn"] += 1
+        turn = _state["turn"]
+        messages = _state["messages"]
+        step_offset = _state["step_offset"]
+
+    def _release():
+        """Idempotent — gọi được nhiều lần mà không lỗi."""
+        with _lock:
+            _state["busy"] = False
 
     def event_stream():
         try:
-            _state["turn"] += 1
-            yield _sse({"type": "turn_start", "turn": _state["turn"]})
+            yield _sse({"type": "turn_start", "turn": turn})
 
             # ReAct loop — yield từng event ngay khi xảy ra (stream thật)
-            for event in run_react_agent(
-                message, llm, _state["messages"], _state["step_offset"]
-            ):
+            for event in run_react_agent(message, llm, messages, step_offset):
                 yield _sse(event)
 
-            # Giữ đánh số step liên tục qua các turn (giống CLI)
-            _state["step_offset"] += MAX_ITERATIONS
-            yield _sse({"type": "done", "turn": _state["turn"]})
+            yield _sse({"type": "done", "turn": turn})
         except Exception as e:
             yield _sse({"type": "error", "step": None, "content": f"Server error: {e}"})
+            yield _sse({"type": "done", "turn": turn})
         finally:
-            _lock.release()
+            # Giữ đánh số step liên tục qua các turn (giống CLI) — kể cả khi
+            # turn này lỗi giữa chừng, nếu không turn sau sẽ đánh trùng số step.
+            with _lock:
+                _state["step_offset"] += MAX_ITERATIONS
+            _release()
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        # Chốt chặn: nếu client ngắt kết nối trước khi generator kịp chạy,
+        # busy vẫn được gỡ, tránh server kẹt 409 vĩnh viễn.
+        background=BackgroundTask(_release),
     )
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    # Mặc định 127.0.0.1: uvicorn sẽ in ra link bấm vào được ngay.
+    # (Đừng mở http://0.0.0.0:8000 trên trình duyệt — Chrome báo ERR_ADDRESS_INVALID.
+    #  0.0.0.0 chỉ là địa chỉ server LẮNG NGHE, không phải địa chỉ để truy cập.)
+    # Muốn máy khác trong cùng mạng LAN vào được: set HOST=0.0.0.0 rồi truy cập
+    # bằng IP thật của máy này (vd: http://192.168.1.5:8000).
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8000"))
+
+    print(f"\n🌐 Mở trình duyệt tại: http://localhost:{port}\n")
+    uvicorn.run("server:app", host=host, port=port, reload=True)

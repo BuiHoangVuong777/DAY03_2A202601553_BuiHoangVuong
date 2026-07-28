@@ -102,7 +102,7 @@ def get_llm_provider(model: str = None, provider: str = None, **extra_kwargs):
     # 7. Khởi tạo ChatModel qua LangChain init_chat_model
     try:
         llm = init_chat_model(**init_kwargs)
-    except (ValueError, ImportError) as e:
+    except Exception as e:  # gồm cả lỗi thiếu API key từ SDK (vd: openai.OpenAIError)
         raise ValueError(
             f"Không thể khởi tạo model '{model}' với provider '{provider_name}'. Lỗi: {e}"
         ) from e
