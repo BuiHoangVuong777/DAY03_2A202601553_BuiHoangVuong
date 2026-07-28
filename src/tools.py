@@ -972,6 +972,23 @@ def _skill_matches(required: str, owned: str) -> bool:
     return False
 
 
+def _required_skill_matches(required: str, owned_skills: list[str]) -> bool:
+    """Match một yêu cầu đơn hoặc yêu cầu ghép với toàn bộ kỹ năng đã khai báo."""
+    if any(_skill_matches(required, owned) for owned in owned_skills):
+        return True
+
+    normalized = _normalize_text(required)
+    separator = " và " if " và " in normalized else " and " if " and " in normalized else None
+    if separator is None:
+        return False
+
+    components = [part.strip() for part in normalized.split(separator) if part.strip()]
+    return bool(components) and all(
+        any(_skill_matches(component, owned) for owned in owned_skills)
+        for component in components
+    )
+
+
 def check_course_readiness(
     course_code: str,
     current_skills: list[str],
@@ -1003,7 +1020,7 @@ def check_course_readiness(
         matched: list[str] = []
         missing: list[str] = []
         for required_skill in required:
-            if any(_skill_matches(required_skill, owned_skill) for owned_skill in owned):
+            if _required_skill_matches(required_skill, owned):
                 matched.append(required_skill)
             else:
                 missing.append(required_skill)

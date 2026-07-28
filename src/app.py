@@ -7,6 +7,7 @@ Sử dụng LangChain native tool calling mechanism.
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Generator
 from dotenv import load_dotenv
 
@@ -26,7 +27,12 @@ if sys.stdout.encoding != "utf-8":
 
 # Import các thành phần từ file của Role 2, Role 3 & Multi-Provider Adapter
 from tools import AVAILABLE_TOOLS
-from prompts import AGENT_SYSTEM_PROMPT, CHATBOT_BASELINE_PROMPT, MAX_ITERATIONS
+from prompts import (
+    AGENT_SYSTEM_PROMPT,
+    CHATBOT_BASELINE_PROMPT,
+    MAX_ITERATIONS,
+    TIMEOUT_SECONDS,
+)
 from providers import get_llm_provider
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -56,7 +62,9 @@ def get_ai_course_detail(course_code: str) -> str:
     """Get complete details of a specific AI/Python course.
 
     Args:
-        course_code: Course code (e.g., "PY101", "ML301", "DL401")
+        course_code: Exact course code copied from the user's text or a prior
+            tool result (e.g., "PY101"). Never infer a code from a course title;
+            call search_ai_courses first when the user provides only a title.
 
     Returns:
         Formatted string with course details including prerequisites, skills, duration, etc.
@@ -69,7 +77,9 @@ def check_course_readiness(course_code: str, current_skills: list[str]) -> str:
     """Check if a learner is ready for a course based on their current skills.
 
     Args:
-        course_code: Course code to check (e.g., "ML301")
+        course_code: Exact course code copied from the user's text or a prior
+            tool result. Never guess codes such as ML101/ML201/ML301 from the
+            title "Machine Learning căn bản"; search the title first.
         current_skills: List of skills the learner currently has (e.g., ["python", "math", "statistics"])
 
     Returns:
@@ -93,7 +103,7 @@ def get_learning_track(goal: str) -> str:
 
 @tool
 def filter_courses_by_constraints(
-    course_codes: list[str], available_hours_per_week: int, budget_level: str
+    course_codes: list[str], available_hours_per_week: int | str, budget_level: str
 ) -> str:
     """Filter courses based on time and budget constraints.
 
@@ -133,14 +143,11 @@ def load_test_cases():
 
 
 def _build_query(tc: dict) -> str:
-    """Chuyển test case dạng {input: {...}} thành câu hỏi tự nhiên cho LLM."""
-    inp = tc["input"]
-    return (
-        f"Mình {inp['level']}, "
-        f"muốn {inp['goal']}, "
-        f"thời gian rảnh {inp['free_time']}, "
-        f"ngân sách {inp['budget']}."
-    )
+    """Lấy nguyên văn câu hỏi người dùng từ test case."""
+    question = tc.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("Test case phải có trường 'question' là chuỗi không rỗng.")
+    return question.strip()
 
 
 def run_baseline_chatbot(user_query: str, llm):
@@ -159,12 +166,64 @@ def run_baseline_chatbot(user_query: str, llm):
     print(f"🤖 Chatbot trả lời:\n{response.content}")
 
 
+_TOOL_THOUGHTS = {
+    "search_ai_courses": "Cần tìm khóa học liên quan trong catalog.",
+    "get_ai_course_detail": "Cần lấy thông tin chi tiết của khóa học đã xác định.",
+    "check_course_readiness": "Cần đối chiếu kỹ năng hiện có với yêu cầu của khóa.",
+    "get_learning_track": "Cần lấy lộ trình chuẩn theo mục tiêu học tập.",
+    "filter_courses_by_constraints": "Cần lọc danh sách khóa theo thời gian và ngân sách.",
+}
+
+
+def _content_to_text(content) -> str:
+    """Chuẩn hóa content của nhiều provider thành text để log."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "\n".join(parts).strip()
+    return str(content).strip() if content is not None else ""
+
+
+def _invoke_tool_safely(tool_name: str, tool_args: dict) -> str:
+    """Thực thi đúng một LangChain tool với timeout và lỗi dạng Observation."""
+    selected_tool = LANGCHAIN_TOOLS.get(tool_name)
+    if selected_tool is None:
+        return (
+            f"LỖI: Tool '{tool_name}' không tồn tại. Các tool hợp lệ: "
+            + ", ".join(LANGCHAIN_TOOLS)
+        )
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(selected_tool.invoke, tool_args)
+    try:
+        result = future.result(timeout=TIMEOUT_SECONDS)
+    except FutureTimeoutError:
+        future.cancel()
+        return f"LỖI HỆ THỐNG: Tool '{tool_name}' vượt quá timeout {TIMEOUT_SECONDS} giây."
+    except (TypeError, ValueError) as exc:
+        return f"LỖI THAM SỐ: {exc}"
+    except Exception as exc:
+        return f"LỖI HỆ THỐNG: Tool '{tool_name}' gặp lỗi: {exc}"
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    if not isinstance(result, str):
+        return f"LỖI HỆ THỐNG: Tool '{tool_name}' không trả về chuỗi."
+    return result
+
+
 def run_react_agent(
     user_query: str,
     llm,
     messages: list,
     step_offset: int = 0,
-) -> Generator[dict, None, None]:
+) -> Generator[dict, None, int]:
     """
     Vòng lặp ReAct Agent – multi-turn.
 
@@ -202,6 +261,7 @@ def run_react_agent(
 
     # Append HumanMessage cho turn này
     messages.append(HumanMessage(content=user_query))
+    seen_calls: set[str] = set()
 
     for step_rel in range(1, MAX_ITERATIONS + 1):
         step = step_offset + step_rel
@@ -212,53 +272,78 @@ def run_react_agent(
             yield {"type": "error", "step": step, "content": f"LLM call failed: {e}"}
             return step_rel
 
-        # Sau khi LLM trả lời, append AI message vào messages.
-        # Nếu response CÓ tool_calls, response đã chứa cả tool_calls metadata
-        # → append nguyên bản, rồi sau đó append từng ToolMessage.
-        # Nếu response KHÔNG có tool_calls, đó là final message.
-        messages.append(AIMessage(content=response.content or "", tool_calls=getattr(response, "tool_calls", []) or []))
+        response_text = _content_to_text(response.content)
+        raw_tool_calls = getattr(response, "tool_calls", []) or []
+        # ReAct tuần tự: một lượt LLM chỉ được đưa đúng một Action vào lịch sử.
+        tool_calls = raw_tool_calls[:1]
+        messages.append(AIMessage(content=response.content or "", tool_calls=tool_calls))
 
-        if response.content:
-            yield {"type": "thought", "step": step, "content": response.content}
-
-        tool_calls = getattr(response, "tool_calls", []) or []
         if tool_calls:
-            for tc in tool_calls:
-                tool_name = tc["name"]
-                tool_args = tc["args"]
-                call_id = tc["id"]
-
+            if len(raw_tool_calls) > 1:
                 yield {
-                    "type": "action",
+                    "type": "guardrail",
                     "step": step,
-                    "tool": tool_name,
-                    "args": tool_args,
-                    "call_id": call_id,
+                    "content": (
+                        f"Model đề xuất {len(raw_tool_calls)} tool calls song song; "
+                        "chỉ Action đầu tiên được thực thi để giữ đúng ReAct tuần tự."
+                    ),
                 }
 
-                # Dispatch tool
-                if tool_name not in LANGCHAIN_TOOLS:
-                    obs = f"LỖI: Tool '{tool_name}' không tồn tại. Các tool hợp lệ: {', '.join(LANGCHAIN_TOOLS.keys())}"
-                else:
-                    try:
-                        obs = LANGCHAIN_TOOLS[tool_name].invoke(tool_args)
-                    except Exception as e:
-                        obs = f"LỖI HỆ THỐNG: Tool '{tool_name}' gặp lỗi: {e}"
+            tc = tool_calls[0]
+            tool_name = tc["name"]
+            tool_args = tc["args"]
+            call_id = tc.get("id") or f"call_{step}"
 
-                # Append ToolMessage vào messages (liên kết qua call_id)
-                from langchain_core.messages import ToolMessage
-                messages.append(ToolMessage(content=obs, tool_call_id=call_id))
+            yield {
+                "type": "thought",
+                "step": step,
+                "content": response_text or _TOOL_THOUGHTS.get(
+                    tool_name, "Cần gọi tool để lấy dữ liệu đáng tin cậy."
+                ),
+            }
+            yield {
+                "type": "action",
+                "step": step,
+                "tool": tool_name,
+                "args": tool_args,
+                "call_id": call_id,
+            }
 
+            call_key = json.dumps(
+                {"tool": tool_name, "args": tool_args},
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            repeated = call_key in seen_calls
+            if repeated:
+                obs = (
+                    "LỖI THAM SỐ: Không được lặp lại cùng tool với cùng tham số "
+                    "khi Observation không đổi."
+                )
+            else:
+                seen_calls.add(call_key)
+                obs = _invoke_tool_safely(tool_name, tool_args)
+
+            messages.append(ToolMessage(content=obs, tool_call_id=call_id))
+            yield {
+                "type": "observation",
+                "step": step,
+                "tool": tool_name,
+                "content": obs,
+                "call_id": call_id,
+            }
+
+            if repeated:
                 yield {
-                    "type": "observation",
+                    "type": "guardrail",
                     "step": step,
-                    "tool": tool_name,
-                    "content": obs,
-                    "call_id": call_id,
+                    "content": "Phát hiện Action lặp. Agent đã dừng an toàn.",
                 }
+                return step_rel
         else:
             # Không có tool_calls → Final Answer
-            yield {"type": "final", "step": step, "content": response.content or ""}
+            yield {"type": "final", "step": step, "content": response_text}
             return step_rel
 
     # Guardrail
@@ -353,9 +438,12 @@ if __name__ == "__main__":
         print(f"{'═' * 60}\n")
 
         # Chạy ReAct agent với accumulated messages
+        steps_used = 0
         for event in run_react_agent(user_input, llm, messages, step_offset):
             step = event.get("step", "?")
             rtype = event["type"]
+            if isinstance(step, int):
+                steps_used = max(steps_used, step - step_offset)
 
             if rtype == "thought":
                 print(f"[Step {step}] 💭 Thought")
@@ -384,8 +472,8 @@ if __name__ == "__main__":
                 print(f"[Step {step}] ❌ Error")
                 print(f"   {event['content']}\n")
 
-        # Cập nhật step_offset để turn sau đánh số step liên tục
-        step_offset += MAX_ITERATIONS
+        # Cập nhật theo số bước thực tế thay vì luôn nhảy MAX_ITERATIONS.
+        step_offset += max(steps_used, 1)
 
         print("─" * 60 + "\n")
 

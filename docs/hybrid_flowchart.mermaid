@@ -21,7 +21,7 @@ flowchart TD
     PROFILE -->|Thiếu và cần tư vấn cá nhân hóa| ASK[Hỏi lại đúng trường còn thiếu<br/>Chưa gọi Tool]
     ASK --> G
 
-    PROFILE -->|Đủ, hoặc chỉ tra cứu 1 khóa/lộ trình| I{Cần thông tin gì?}
+    PROFILE -->|Đủ, hoặc chỉ tra cứu 1 khóa/lộ trình| I{Chọn đúng 1 Action trong vòng này:<br/>cần thông tin gì?}
 
     I -->|Tìm khóa theo từ khóa| J1[Tool: search_ai_courses]
     I -->|Chi tiết một mã khóa| J2[Tool: get_ai_course_detail]
@@ -40,13 +40,13 @@ flowchart TD
 
     OBS -->|KẾT QUẢ / SẴN SÀNG| N
     OBS -->|CHƯA SẴN SÀNG| BIZ[Nêu prerequisite và kỹ năng còn thiếu<br/>Không xác nhận đủ điều kiện]
-    OBS -->|KHÔNG CÓ KẾT QUẢ| RETRY[Thử lại tối đa 1 lần<br/>với từ khóa rộng hơn]
-    OBS -->|LỖI THAM SỐ| FIXARG[Sửa tham số và thử lại tối đa 1 lần]
+    OBS -->|KHÔNG CÓ KẾT QUẢ| RETRY[Đổi sang từ khóa rộng hơn<br/>tối đa 1 lần]
+    OBS -->|LỖI THAM SỐ| FIXARG[Sửa Action Input<br/>tối đa 1 lần]
     OBS -->|LỖI / LỖI HỆ THỐNG| SAFE[Dừng an toàn<br/>Báo chưa xác nhận được, không bịa]
 
     BIZ --> N
-    RETRY --> N
-    FIXARG --> N
+    RETRY --> I
+    FIXARG --> I
     SAFE --> P
 
     N{Đã đủ thông tin chưa?}

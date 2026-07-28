@@ -141,11 +141,15 @@ def chat(message: str = Query(..., min_length=1)):
             _state["busy"] = False
 
     def event_stream():
+        steps_used = 0
         try:
             yield _sse({"type": "turn_start", "turn": turn})
 
             # ReAct loop — yield từng event ngay khi xảy ra (stream thật)
             for event in run_react_agent(message, llm, messages, step_offset):
+                step = event.get("step")
+                if isinstance(step, int):
+                    steps_used = max(steps_used, step - step_offset)
                 yield _sse(event)
 
             yield _sse({"type": "done", "turn": turn})
@@ -153,10 +157,9 @@ def chat(message: str = Query(..., min_length=1)):
             yield _sse({"type": "error", "step": None, "content": f"Server error: {e}"})
             yield _sse({"type": "done", "turn": turn})
         finally:
-            # Giữ đánh số step liên tục qua các turn (giống CLI) — kể cả khi
-            # turn này lỗi giữa chừng, nếu không turn sau sẽ đánh trùng số step.
+            # Giữ đánh số step liên tục theo số bước thực tế của turn.
             with _lock:
-                _state["step_offset"] += MAX_ITERATIONS
+                _state["step_offset"] += max(steps_used, 1)
             _release()
 
     return StreamingResponse(
