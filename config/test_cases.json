@@ -252,20 +252,16 @@
       "must_not_use_tools": true
     },
     "agent_expected": {
-      "behavior": "Lấy chi tiết GENAI601, kiểm tra readiness, từ chối bỏ qua prerequisite và nêu kỹ năng còn thiếu.",
+      "behavior": "Gọi trực tiếp check_course_readiness cho GENAI601 với danh sách kỹ năng rỗng; từ chối bỏ qua prerequisite và nêu kỹ năng còn thiếu.",
       "expected_tools": [
-        "get_ai_course_detail",
         "check_course_readiness"
       ],
       "expected_course_ids": [
         "GENAI601"
       ],
-      "expected_observation_prefixes": [
-        "KẾT QUẢ:",
-        "CHƯA SẴN SÀNG:"
-      ],
+      "expected_observation_prefix": "CHƯA SẴN SÀNG:",
       "expected_readiness": "not_ready",
-      "max_tool_calls": 2,
+      "max_tool_calls": 1,
       "must_warn_about_prerequisites": true,
       "must_not_hallucinate": true
     }
