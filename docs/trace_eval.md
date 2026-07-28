@@ -18,12 +18,25 @@
 
 ## 🔍 2. SO SÁNH PHẢN HỒI (TEST CASE #3)
 
-**Câu hỏi**: *"Thời tiết ở Hà Nội hôm nay thế nào và tôi nên mặc gì đi chơi?"*
+**Câu hỏi**: *"Mình chưa biết gì, muốn học nền tảng, thời gian rảnh ít, ngân sách thấp."*
 
 ### 🤖 Chatbot Baseline:
 
-* **Phản hồi**: *"Tôi không có truy cập Internet thời gian thực nên không biết thời tiết hôm nay ở Hà Nội."*
-* **Nhận xét**: An toàn nhưng không giải quyết được nhu cầu thực tế của người dùng.
+* **Phản hồi**:
+  > Hướng học đề xuất: Python nền tảng
+  >
+  > Lý do: Bạn đang ở mức độ beginner, muốn học nền tảng và có thời gian rảnh ít cùng ngân sách thấp, nên hướng học Python nền tảng sẽ phù hợp nhất với bạn.
+  >
+  > Lộ trình ngắn:
+  >
+  > 1. Học cú pháp cơ bản của Python (biến, kiểu dữ liệu, cấu trúc điều kiện, vòng lặp).
+  > 2. Làm các bài tập nhỏ để củng cố kiến thức.
+  > 3. Học lập trình hướng đối tượng (OOP) cơ bản.
+  > 4. Thực hiện một project nhỏ để áp dụng kiến thức đã học.
+  >
+  >
+
+**Nhận xét**: Phản hồi an toàn, tránh được hiện tượng ảo tưởng thông tin nhờ hệ thống nhắc nhở giới hạn dữ liệu. Tuy nhiên, do thiếu khả năng tích hợp công cụ (Tool Use), phản hồi hoàn toàn là lý thuyết tĩnh và không mang tính hành động (Actionable) cho người dùng.
 
 ### 🧠 ReAct Agent:
 
