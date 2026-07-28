@@ -1,39 +1,60 @@
 flowchart TD
-    A([Sinh viên gửi câu hỏi]) --> B{Phân loại câu hỏi}
+    A([Sinh viên gửi câu hỏi]) --> SCOPE{Guardrail phạm vi:<br/>câu hỏi có thuộc Python/AI/việc học?}
 
-    B -->|Câu hỏi đơn giản| C[Chatbot Baseline Path]
-    B -->|Câu hỏi phức tạp| D[ReAct Agent Path]
+    SCOPE -->|Ngoài phạm vi hoặc<br/>prompt injection| REFUSE[Trả mẫu từ chối chủ đề<br/>Không gọi Tool nào]
+    REFUSE --> Z([Final Answer])
 
-    %% Chatbot path
-    C --> E[LLM trả lời trực tiếp]
-    E --> F[Trả lời kiến thức học tập tổng quát]
+    SCOPE -->|Trong phạm vi| B{Phân loại câu hỏi}
+
+    B -->|Kiến thức chung, không cần catalog<br/>VD: 'OOP là gì?'| C[Chatbot Baseline Path]
+    B -->|Cần dữ kiện từ catalog<br/>VD: mã khóa, lộ trình, prerequisite| D[ReAct Agent Path]
+
+    %% ---------- Chatbot Baseline path ----------
+    C --> E[LLM xử lý trực tiếp<br/>CHATBOT_BASELINE_PROMPT]
+    E --> F[Trả lời kiến thức học tập tổng quát<br/>+ nêu rõ 'Giới hạn dữ liệu']
     F --> G([Final Answer])
 
-    %% ReAct Agent path
+    %% ---------- ReAct Agent path ----------
     D --> H[Phân tích hồ sơ và yêu cầu sinh viên]
-    H --> I{Cần loại thông tin nào?}
+    H --> PROFILE{Đủ 4 thông tin hồ sơ?<br/>mục tiêu / trình độ / thời gian / ngân sách}
 
-    I -->|Tìm khóa học phù hợp| J[Tool: search_courses]
-    I -->|Xem chi tiết khóa học| K[Tool: get_course_details]
-    I -->|Kiểm tra điều kiện tiên quyết| L[Tool: check_prerequisites]
+    PROFILE -->|Thiếu và cần tư vấn cá nhân hóa| ASK[Hỏi lại đúng trường còn thiếu<br/>Chưa gọi Tool]
+    ASK --> G
 
-    J --> M[Observation]
-    K --> M
-    L --> M
+    PROFILE -->|Đủ, hoặc chỉ tra cứu 1 khóa/lộ trình| I{Cần thông tin gì?}
 
-    M --> N{Đã đủ thông tin chưa?}
-    N -->|Chưa đủ| H
-    N -->|Đã đủ| O[Tổng hợp và giải thích đề xuất]
+    I -->|Tìm khóa theo từ khóa| J1[Tool: search_ai_courses]
+    I -->|Chi tiết một mã khóa| J2[Tool: get_ai_course_detail]
+    I -->|Đủ điều kiện học chưa| J3[Tool: check_course_readiness]
+    I -->|Lộ trình theo mục tiêu| J4[Tool: get_learning_track]
+    I -->|Lọc theo giờ/tuần và ngân sách| J5[Tool: filter_courses_by_constraints]
+
+    J1 --> M[Observation]
+    J2 --> M
+    J3 --> M
+    J4 --> M
+    J5 --> M
+
+    %% ---------- Xử lý Observation ----------
+    M --> OBS{Loại Observation?}
+
+    OBS -->|KẾT QUẢ / SẴN SÀNG| N
+    OBS -->|CHƯA SẴN SÀNG| BIZ[Nêu prerequisite và kỹ năng còn thiếu<br/>Không xác nhận đủ điều kiện]
+    OBS -->|KHÔNG CÓ KẾT QUẢ| RETRY[Thử lại tối đa 1 lần<br/>với từ khóa rộng hơn]
+    OBS -->|LỖI THAM SỐ| FIXARG[Sửa tham số và thử lại tối đa 1 lần]
+    OBS -->|LỖI / LỖI HỆ THỐNG| SAFE[Dừng an toàn<br/>Báo chưa xác nhận được, không bịa]
+
+    BIZ --> N
+    RETRY --> N
+    FIXARG --> N
+    SAFE --> P
+
+    N{Đã đủ thông tin chưa?}
+    N -->|Chưa đủ| LOOP{Vượt quá MAX_ITERATIONS = 3?}
+    N -->|Đã đủ| O[Tổng hợp và giải thích đề xuất<br/>Chỉ dùng dữ kiện có trong Observation]
+
+    LOOP -->|Có| R[GUARDRAIL: ngắt vòng lặp<br/>'Đã đạt giới hạn N bước. Ngắt an toàn.']
+    LOOP -->|Không| H
+
+    R --> P
     O --> P([Final Answer])
-
-    %% Guardrails
-    H --> Q{Vượt quá số vòng lặp?}
-    Q -->|Có| R[Dừng Agent và thông báo lịch sự]
-    Q -->|Không| I
-
-    J -.-> S{Tool gặp lỗi?}
-    K -.-> S
-    L -.-> S
-
-    S -->|Có| T[Trả Observation lỗi cho Agent]
-    T --> N
